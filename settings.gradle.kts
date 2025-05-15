@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "TravelPlanner"
 include(":androidApp")
 include(":composeApp")
+include(":journal")
