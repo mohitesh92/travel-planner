@@ -34,26 +34,42 @@ This mental model is intuitive for developers and can be translated into user-fr
 Events are immutable facts that have occurred in our system. They represent state changes and are named in past tense.
 
 ```kotlin
-interface Event {
-    val id: String               // Unique event identifier
-    val aggregateId: String      // Which trip this event belongs to
-    val timestamp: Long          // When the event occurred  
-    val version: Long            // Sequential version number
+/**
+ * Base interface for all events in the system.
+ * Events are immutable records of something that has happened in the past.
+ * An event is hashable, meaning it can be used as a key in hash-based collections.
+ */
+interface Event : Hashable {
+    /** Unique identifier for this event instance */
+    val id: String
+    
+    /** Identifier of the aggregate this event belongs to */
+    val aggregateId: String
+    
+    /** When the event occurred */
+    val timestamp: Long
+
+    /** The version of the aggregate when this event was created, null for first event */
+    val currentVersion: Hash?
 }
 
 data class TripCreatedEvent(
     override val id: String,
     override val aggregateId: String,
     override val timestamp: Long,
-    override val version: Long,
+    override val currentVersion: Hash?,
     val name: String,
     val destination: String,
     val startDate: Long,
     val endDate: Long
-) : Event
+) : Event {
+    override fun hash(): Hash {
+        return toString().hash
+    }
+}
 ```
 
-The `version` field acts like a commit ID in Git—it ensures we maintain the correct sequence and helps with concurrency control. Just as Git requires you to be on the same commit as the remote before pushing changes, our system requires you to be on the expected version before applying new events.
+Each event implements the `Hashable` interface, allowing us to generate a secure hash that uniquely identifies the event. This hash acts like a commit ID in Git—it ensures we maintain the correct sequence and helps with concurrency control. Just as Git requires you to be on the same commit as the remote before pushing changes, our system requires you to be on the expected version hash before applying new events.
 
 ### 2. Command
 
@@ -81,7 +97,7 @@ Aggregates encapsulate domain entities and ensure business rule consistency. The
 
 ```kotlin
 abstract class Aggregate<E : Event>(val id: String) {
-    var version: Long = 0
+    var version: Hash? = null
     protected val changes = mutableListOf<E>()
     
     fun uncommittedChanges(): List<E> = changes.toList()
@@ -105,7 +121,7 @@ class TripAggregate(id: String) : Aggregate<Event>(id) {
             id = UUID.randomUUID().toString(),
             aggregateId = command.aggregateId,
             timestamp = System.currentTimeMillis(),
-            version = version + 1,
+            currentVersion = version,
             name = command.name,
             destination = command.destination,
             startDate = command.startDate,
@@ -123,7 +139,7 @@ class TripAggregate(id: String) : Aggregate<Event>(id) {
                 destination = event.destination
                 startDate = event.startDate
                 endDate = event.endDate
-                version = event.version
+                version = event.hash()
             }
             // Handle other event types...
         }
@@ -131,29 +147,117 @@ class TripAggregate(id: String) : Aggregate<Event>(id) {
 }
 ```
 
-### 4. Event Store
+### 4. Hash
+
+The Hash class represents a secure cryptographic hash that uniquely identifies data like events and aggregate versions. It's inspired by Git's commit hashes.
+
+```kotlin
+/**
+ * A hash is a unique identifier for a piece of data.
+ */
+data class Hash(
+    private val value: String
+) : Comparable<Hash> {
+    init {
+        // SHA256 returns a 64 character hex string
+        require(value.length == 64)
+
+        // SHA256 returns a hex string
+        require(value.all { it in '0'..'9' || it in 'a'..'f' })
+    }
+
+    override fun compareTo(other: Hash): Int {
+        return value.compareTo(other.value)
+    }
+
+    override fun toString(): String {
+        return value
+    }
+}
+
+val String.hash: Hash
+    get() = Hash(sha256(this))
+
+interface Hashable {
+    fun hash(): Hash
+}
+```
+
+The `Hashable` interface allows any object to provide a unique hash representation. This is particularly important for events, enabling precise version control and concurrency management.
+
+### 5. Event Store
 
 The event store is the persistent storage for all events—the source of truth in our system.
 
 ```kotlin
 interface EventStore {
-    suspend fun saveEvents(aggregateId: String, events: List<Event>, expectedVersion: Long)
+    /**
+     * Saves an event for a specific aggregate.
+     * 
+     * @param aggregateId The ID of the aggregate this event belongs to
+     * @param event The event to save
+     * @param expectedVersion The expected current version hash of the aggregate (for optimistic concurrency)
+     * @throws ConcurrencyException If the expected version doesn't match the actual version
+     * @return The new version (hash) of the aggregate after the commit
+     */
+    suspend fun commit(aggregateId: String, event: Event, expectedVersion: Hash): Hash
+    
+    /**
+     * Retrieves all events for a specific aggregate.
+     * 
+     * @param aggregateId The ID of the aggregate
+     * @return A list of events for the aggregate, ordered by version
+     */
     suspend fun getEventsForAggregate(aggregateId: String): List<Event>
-    suspend fun getAllEvents(): Flow<Event>
+    
+    /**
+     * Retrieves all events in the system.
+     * 
+     * @return A flow of all events, typically ordered by timestamp
+     */
+    fun getAllEvents(): Flow<Event>
 }
 ```
 
-### 5. Command Handler
+### 6. RefStore
+
+The RefStore maintains the current version (hash) of each aggregate, allowing for atomic operations and optimistic concurrency control.
+
+```kotlin
+interface RefStore {
+    /**
+     * Atomically swap the reference for an aggregate.
+     *
+     * @param aggregateId The unique identifier for the aggregate
+     * @param newRef The new reference hash to store
+     * @param oldRef The expected current reference hash (for optimistic concurrency)
+     * @throws ConcurrencyException If the current reference doesn't match oldRef
+     */
+    suspend fun swap(aggregateId: String, newRef: Hash, oldRef: Hash?)
+
+    /**
+     * Retrieve the current reference hash for an aggregate.
+     *
+     * @param aggregateId The unique identifier of the aggregate
+     * @return The stored reference hash, or null if not found
+     */
+    suspend fun read(aggregateId: String): Hash?
+}
+```
+
+The RefStore is a critical component for ensuring data integrity and managing concurrent modifications. It works closely with the EventStore to maintain the correct version chains.
+
+### 7. Command Handler
 
 Command handlers orchestrate processing of commands, ensuring they're valid and storing resulting events.
 
 ```kotlin
 interface CommandHandler<C : Command> {
-    suspend fun handle(command: C): Result<List<Event>>
+    suspend fun handle(command: C): Result<Event>
 }
 ```
 
-### 6. Event Handler/Projector
+### 8. Event Handler/Projector
 
 Projectors build read models optimized for queries by consuming events.
 
@@ -163,18 +267,18 @@ interface EventHandler {
 }
 ```
 
-### 7. Repository
+### 9. Repository
 
 Repositories reconstruct aggregate state by replaying events.
 
 ```kotlin
 interface AggregateRepository<T : Aggregate<*>> {
     suspend fun getById(id: String): T
-    suspend fun save(aggregate: T)
+    suspend fun save(aggregate: T, expectedVersion: Hash): Hash
 }
 ```
 
-### 8. State
+### 10. State
 
 The application state derived from events.
 
@@ -189,7 +293,7 @@ data class TripDto(
 )
 ```
 
-### 9. Event Bus
+### 11. Event Bus
 
 Distributes events to interested handlers.
 
@@ -228,18 +332,81 @@ More advanced users can create branches for alternative itineraries. For example
 
 These alternatives can be compared side-by-side and merged as needed.
 
+### 12. Atomic Operations
+
+Our system implements transaction-like behavior for non-database operations through the combination of RefStore and EventStore. This ensures operations are atomic and consistent:
+
+```kotlin
+override suspend fun commit(
+    aggregateId: String,
+    event: Event,
+    expectedVersion: Hash
+): Hash {
+    // First check the current version matches the expected version
+    val currentVersion = refStore.read(aggregateId)
+    if (currentVersion != null) {
+        if (currentVersion != expectedVersion) {
+            throw ConcurrencyException(
+                "Concurrency conflict: expected version $expectedVersion, but current version is $currentVersion"
+            )
+        }
+    } else {
+        // For a new aggregate, make sure we're initializing with the zero hash
+        val zeroHash = Hash("0".repeat(64))
+        if (expectedVersion != zeroHash) {
+            throw ConcurrencyException(
+                "Concurrency conflict: expected initial version to be $zeroHash, but got $expectedVersion"
+            )
+        }
+    }
+
+    // Add events to the store
+    val eventList = eventStore.getOrPut(aggregateId) { mutableListOf() }
+    eventList.add(event)
+
+    val newVersion = event.hash()
+
+    // Update the version using an atomic operation
+    runCatching { refStore.swap(aggregateId = aggregateId, newRef = newVersion, oldRef = currentVersion) }
+        .onFailure {
+            // remove the event from the store if the swap fails
+            eventStore[aggregateId]?.remove(event)
+            // If the swap fails, it means the expected version was incorrect
+            throw ConcurrencyException(
+                "Concurrency conflict: expected version $expectedVersion, but current version is $currentVersion"
+            )
+        }
+
+    return newVersion
+}
+```
+
+This pattern implements transaction-like behavior by:
+1. Checking preconditions before any changes occur
+2. Making changes to one data store (eventStore)
+3. Atomically updating the reference with a compare-and-swap operation
+4. Rolling back the first change if the atomic operation fails
+5. Ensuring all-or-nothing semantics
+
 ## Implementation Strategy
 
-Our implementation will be housed in a dedicated `journal` module within our Kotlin Multiplatform project, allowing the event sourcing system to be used across both Android and iOS.
+Our implementation is housed in a dedicated `journal` module within our Kotlin Multiplatform project, allowing the event sourcing system to be used across both Android and iOS.
 
-We'll start by defining the core interfaces, then implement the basic functionality needed for a minimum viable product:
+We've started by defining the core interfaces and implemented the basic functionality needed for a minimum viable product:
 
-1. Create trips
+1. Core infrastructure for Events, Commands, and Hash-based versioning
+2. Concurrent operations with optimistic locking
+3. Atomic operations with rollback capability
+4. In-memory implementations for testing and prototyping
+
+Next, we're working on these features:
+
+1. Create trips with proper aggregate roots
 2. Add activities and bookings
 3. Share trips with other users
-4. Support basic offline operations
+4. Support robust offline operations
 
-Once that foundation is in place, we can add more advanced features like branching, conflict resolution UI, and detailed history visualization.
+Once that foundation is in place, we'll add more advanced features like branching, conflict resolution UI, and detailed history visualization.
 
 ## Benefits of This Approach
 
