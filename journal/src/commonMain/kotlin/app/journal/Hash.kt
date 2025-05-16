@@ -1,12 +1,9 @@
 package app.journal
 
-import kotlin.jvm.JvmInline
-
 /**
  * A hash is a unique identifier for a piece of data.
  */
-@JvmInline
-value class Hash(
+data class Hash(
     private val value: String
 ) : Comparable<Hash> {
     init {

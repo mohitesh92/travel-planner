@@ -1,6 +1,7 @@
 package app.journal
 
 import app.journal.supporting.InMemoryEventStore
+import app.journal.supporting.InMemoryRefStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -14,7 +15,7 @@ class EventStoreTest {
     @Test
     fun `should successfully commit and retrieve events`() = runTest {
         // Arrange
-        val store = InMemoryEventStore()
+        val store = provideEventStore()
         val aggregateId = "aggregate-1"
         val zeroHash = Hash("0".repeat(64))
         val event1 = TestEvent(
@@ -46,7 +47,7 @@ class EventStoreTest {
     @Test
     fun `should throw concurrency exception when expected version doesn't match`() = runTest {
         // Arrange
-        val store = InMemoryEventStore()
+        val store = provideEventStore()
         val aggregateId = "aggregate-1"
         val zeroHash = Hash("0".repeat(64))
         val wrongHash = someHash()  // This is different
@@ -83,7 +84,7 @@ class EventStoreTest {
     @Test
     fun `should enforce new aggregates start with zero hash`() = runTest {
         // Arrange
-        val store = InMemoryEventStore()
+        val store = provideEventStore()
         val aggregateId = "aggregate-1"
         val nonZeroHash = Hash("1".repeat(64))
         val event = TestEvent(
@@ -104,7 +105,7 @@ class EventStoreTest {
     @Test
     fun `should get all events in order`() = runTest {
         // Arrange
-        val store = InMemoryEventStore()
+        val store = provideEventStore()
         val zeroHash = Hash("0".repeat(64))
         
         // Create events for two different aggregates
@@ -155,7 +156,7 @@ class EventStoreTest {
     @Test
     fun `should handle concurrent commits to the same aggregateId`() = runTest {
         // Arrange
-        val store = InMemoryEventStore()
+        val store = provideEventStore()
         val aggregateId = "concurrent-aggregate"
         val zeroHash = Hash("0".repeat(64))
 
@@ -262,4 +263,10 @@ fun getRandomString(length: Int) : String {
     return (1..length)
         .map { allowedChars.random() }
         .joinToString("")
+}
+
+fun provideEventStore(): EventStore {
+    return InMemoryEventStore(
+        refStore = InMemoryRefStore()
+    )
 }
