@@ -1,8 +1,12 @@
 package app.journal
 
+import app.cash.sqldelight.ColumnAdapter
+import kotlinx.serialization.Serializable
+
 /**
  * A hash is a unique identifier for a piece of data.
  */
+@Serializable
 data class Hash(
     private val value: String
 ) : Comparable<Hash> {
@@ -35,3 +39,13 @@ interface Hashable {
 }
 
 expect fun sha256(data: String): String
+
+object HashAdapter : ColumnAdapter<Hash, String> {
+    override fun decode(databaseValue: String): Hash {
+        return Hash(databaseValue)
+    }
+
+    override fun encode(value: Hash): String {
+        return value.toString()
+    }
+}

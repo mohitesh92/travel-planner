@@ -1,12 +1,14 @@
 package app.journal
 
-import app.journal.supporting.memory.InMemoryEventStore
-import app.journal.supporting.memory.InMemoryRefStore
+import app.journal.supporting.sqlite.provideSqliteEventStore
+import app.journal.supporting.sqlite.provideSqliteRefStore
+import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
 /**
  * Test implementation of Event for testing purposes
  */
+@Serializable
 data class TestEvent(
     override val id: String,
     override val aggregateId: String,
@@ -34,13 +36,11 @@ fun getRandomString(length: Int) : String {
 }
 
 fun provideEventStore(): EventStore {
-    return InMemoryEventStore(
-        refStore = provideRefStore()
-    )
+    return provideSqliteEventStore()
 }
 
 fun provideRefStore(): RefStore {
-    return InMemoryRefStore()
+    return provideSqliteRefStore()
 }
 
 fun someRef(): String {

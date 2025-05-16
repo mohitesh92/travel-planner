@@ -1,9 +1,11 @@
+import app.journal.Hash;
+
 -- Events table
 CREATE TABLE events (
     id TEXT NOT NULL PRIMARY KEY,
     aggregate_id TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
-    parent TEXT, -- nullable for first event
+    parent TEXT AS Hash, -- nullable for first event
     type TEXT NOT NULL,
     data TEXT NOT NULL -- serialized event data
 );
@@ -14,13 +16,47 @@ CREATE INDEX events_timestamp ON events(timestamp);
 -- References table for optimistic concurrency control
 CREATE TABLE refs (
     aggregate_id TEXT NOT NULL PRIMARY KEY,
-    version TEXT NOT NULL
+    version TEXT AS Hash NOT NULL
 );
 
--- Queries for EventStore
 getEventsForAggregate:
 SELECT * FROM events
 WHERE aggregate_id = ?
+ORDER BY timestamp ASC;
+
+getEventsByType:
+SELECT * FROM events
+WHERE aggregate_id = ? AND type = ?
+ORDER BY timestamp ASC;
+
+getEventsByTimeRange:
+SELECT * FROM events
+WHERE aggregate_id = :aggregateId AND timestamp >= :start AND timestamp <= :end
+ORDER BY timestamp ASC;
+
+getEventsByStartTime:
+SELECT * FROM events
+WHERE aggregate_id = ? AND timestamp >= ?
+ORDER BY timestamp ASC;
+
+getEventsByEndTime:
+SELECT * FROM events
+WHERE aggregate_id = ? AND timestamp <= ?
+ORDER BY timestamp ASC;
+
+getEventsByTypeAndTimeRange:
+SELECT * FROM events
+WHERE aggregate_id = :aggregateId AND type = :type AND timestamp >= :start AND timestamp <= :end
+ORDER BY timestamp ASC;
+
+getEventsByTypeAndStartTime:
+SELECT * FROM events
+WHERE aggregate_id = ? AND type = ? AND timestamp >= ?
+ORDER BY timestamp ASC;
+
+getEventsByTypeAndEndTime:
+SELECT * FROM events
+    WHERE aggregate_id = ? AND type = ? AND timestamp <= ?
 ORDER BY timestamp ASC;
 
 getAllEvents:
@@ -43,10 +79,13 @@ VALUES (?, ?);
 -- This function is used for optimistic concurrency control
 updateRefIfMatch:
 UPDATE refs
-SET version = ?
-WHERE aggregate_id = ? AND version = ?;
+SET version = :newVersion
+WHERE aggregate_id = :aggregateId AND version = :oldVersion;
 
 -- This query is used for reference deletion
 deleteRef:
 DELETE FROM refs
 WHERE aggregate_id = ?;
+
+changes:
+SELECT changes();

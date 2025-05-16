@@ -53,6 +53,10 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutinesTest)
         }
+
+        androidUnitTest.dependencies {
+            implementation(libs.sqldelight.sqlite)
+        }
     }
 }
 

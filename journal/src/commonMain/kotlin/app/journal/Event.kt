@@ -1,5 +1,9 @@
 package app.journal
 
+import kotlinx.serialization.json.Json
+
+typealias PolymorphicJson = Json
+
 /**
  * Base interface for all events in the system.
  * Events are immutable records of something that has happened in the past.
