@@ -1,7 +1,7 @@
 package app.journal
 
-import app.journal.supporting.InMemoryEventStore
-import app.journal.supporting.InMemoryRefStore
+import app.journal.supporting.memory.InMemoryEventStore
+import app.journal.supporting.memory.InMemoryRefStore
 import kotlin.random.Random
 
 /**
@@ -12,7 +12,8 @@ data class TestEvent(
     override val aggregateId: String,
     override val timestamp: Long,
     override val currentVersion: Hash?,
-    val data: String
+    val data: String,
+    override val type: String = "test.event"
 ) : Event {
     override fun hash(): Hash {
         // Simple implementation for testing

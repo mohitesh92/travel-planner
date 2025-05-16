@@ -1,10 +1,12 @@
-package app.journal.supporting
+package app.journal.supporting.memory
 
 import app.journal.ConcurrencyException
 import app.journal.Event
+import app.journal.EventFilter
 import app.journal.EventStore
 import app.journal.Hash
 import app.journal.RefStore
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 
 /**
@@ -66,12 +68,18 @@ class InMemoryEventStore(
         return newVersion
     }
 
-    override suspend fun getEventsForAggregate(aggregateId: String): List<Event> {
+    override suspend fun events(filter: EventFilter): List<Event> {
         // Return a copy of the list of events for the aggregate, or an empty list if none exist
-        return eventStore[aggregateId]?.toList() ?: emptyList()
+        return eventStore[filter.aggregateId]
+            ?.filter { event ->
+                // Apply all filtering conditions with logical AND
+                (filter.type == null || event.type == filter.type) &&
+                (filter.start == null || event.timestamp >= filter.start) &&
+                (filter.end == null || event.timestamp <= filter.end)
+            }?.toList() ?: emptyList()
     }
 
-    override fun getAllEvents() = kotlinx.coroutines.flow.flow {
+    override fun getAllEvents() = flow {
         // Flatten all events from all aggregates and emit them
         eventStore.values.flatten().sortedBy { it.timestamp }.forEach { emit(it) }
     }

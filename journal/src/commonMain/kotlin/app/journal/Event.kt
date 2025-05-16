@@ -17,4 +17,7 @@ interface Event : Hashable {
 
     /** The version of the aggregate when this event was created, null for first event */
     val currentVersion: Hash?
+
+    /** The unique type of this event. Can be used if we want to filter one type of events */
+    val type: String
 }

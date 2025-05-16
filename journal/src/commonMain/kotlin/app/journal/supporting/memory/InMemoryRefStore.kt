@@ -1,4 +1,4 @@
-package app.journal.supporting
+package app.journal.supporting.memory
 
 import app.journal.ConcurrencyException
 import app.journal.Hash

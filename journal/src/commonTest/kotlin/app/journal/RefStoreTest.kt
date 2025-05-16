@@ -1,6 +1,5 @@
 package app.journal
 
-import app.journal.supporting.InMemoryRefStore
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
