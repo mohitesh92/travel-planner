@@ -1,6 +1,7 @@
 package app.journal
 
 import kotlinx.coroutines.flow.Flow
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Interface for the event store, which is responsible for persisting and retrieving events.
@@ -15,7 +16,8 @@ interface EventStore {
      * @param expectedVersion The expected current version of the aggregate (for optimistic concurrency)
      * @throws ConcurrencyException If the expected version doesn't match the actual version
      */
-    suspend fun saveEvents(aggregateId: String, events: List<Event>, expectedVersion: Long)
+    @Throws(ConcurrencyException::class, CancellationException::class)
+    suspend fun commit(aggregateId: String, events: List<Event>, expectedVersion: Hash)
     
     /**
      * Retrieves all events for a specific aggregate.

@@ -10,7 +10,7 @@ kotlin {
         compilations.all {
             compileTaskProvider.configure {
                 compilerOptions {
-                    jvmTarget.set(JvmTarget.JVM_1_8)
+                    jvmTarget.set(JvmTarget.JVM_11)
                 }
             }
         }
@@ -29,11 +29,11 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // Add Kotlin coroutines for async operations
-            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.coroutinesCore)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutinesTest)
         }
     }
 }
