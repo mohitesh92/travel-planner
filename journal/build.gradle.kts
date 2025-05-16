@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.kotlinAtomicfu)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.sqldelight)
 }
 
 kotlin {
@@ -34,7 +35,20 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutinesCore)
             implementation(libs.kotlinx.serialization)
+            
+            // SQLDelight dependencies
+            implementation(libs.sqldelight.runtime)
+            implementation(libs.sqldelight.coroutines)
         }
+        
+        androidMain.dependencies {
+            implementation(libs.sqldelight.android)
+        }
+        
+        iosMain.dependencies {
+            implementation(libs.sqldelight.native)
+        }
+        
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutinesTest)
@@ -51,5 +65,16 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+sqldelight {
+    databases {
+        create("JournalDatabase") {
+            packageName.set("app.journal.db")
+            srcDirs.setFrom("src/commonMain/sqldelight")
+            // Optional: You can configure SQLite dialect version
+            dialect("app.cash.sqldelight:sqlite-3-38-dialect:${libs.versions.sqldelight.get()}")
+        }
     }
 }

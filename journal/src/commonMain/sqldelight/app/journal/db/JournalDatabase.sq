@@ -1,0 +1,52 @@
+-- Events table
+CREATE TABLE events (
+    id TEXT NOT NULL PRIMARY KEY,
+    aggregate_id TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    parent TEXT, -- nullable for first event
+    type TEXT NOT NULL,
+    data TEXT NOT NULL -- serialized event data
+);
+
+CREATE INDEX events_aggregate_id ON events(aggregate_id);
+CREATE INDEX events_timestamp ON events(timestamp);
+
+-- References table for optimistic concurrency control
+CREATE TABLE refs (
+    aggregate_id TEXT NOT NULL PRIMARY KEY,
+    version TEXT NOT NULL
+);
+
+-- Queries for EventStore
+getEventsForAggregate:
+SELECT * FROM events
+WHERE aggregate_id = ?
+ORDER BY timestamp ASC;
+
+getAllEvents:
+SELECT * FROM events
+ORDER BY timestamp ASC;
+
+insertEvent:
+INSERT INTO events(id, aggregate_id, timestamp, parent, type, data)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- Queries for RefStore
+getRef:
+SELECT version FROM refs
+WHERE aggregate_id = ?;
+
+insertRef:
+INSERT OR REPLACE INTO refs(aggregate_id, version)
+VALUES (?, ?);
+
+-- This function is used for optimistic concurrency control
+updateRefIfMatch:
+UPDATE refs
+SET version = ?
+WHERE aggregate_id = ? AND version = ?;
+
+-- This query is used for reference deletion
+deleteRef:
+DELETE FROM refs
+WHERE aggregate_id = ?;

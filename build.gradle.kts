@@ -8,4 +8,5 @@ plugins {
     alias(libs.plugins.kotlinSerialization).apply(false)
     alias(libs.plugins.ksp).apply(false)
     alias(libs.plugins.kotlinAtomicfu).apply(false)
+    alias(libs.plugins.sqldelight).apply(false)
 }
