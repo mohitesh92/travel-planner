@@ -4,6 +4,8 @@ import app.journal.ConcurrencyException
 import app.journal.Event
 import app.journal.EventStore
 import app.journal.Hash
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * In-memory implementation of EventStore for testing purposes.
@@ -13,39 +15,48 @@ import app.journal.Hash
 class InMemoryEventStore : EventStore {
     // Map of aggregate ID to list of events for that aggregate
     private val eventStore = mutableMapOf<String, MutableList<Event>>()
-    
+
     // Map of aggregate ID to the latest version (hash) of that aggregate
     private val versionStore = mutableMapOf<String, Hash>()
-    
-    override suspend fun commit(aggregateId: String, events: List<Event>, expectedVersion: Hash) {
-        // Check if this is a new aggregate or an update to an existing one
-        if (versionStore.containsKey(aggregateId)) {
-            // This is an update to an existing aggregate
-            val currentVersion = versionStore[aggregateId]
-            
-            // Optimistic concurrency check - only proceed if the expected version matches the current version
-            if (currentVersion != expectedVersion) {
-                throw ConcurrencyException(
-                    "Concurrency conflict: expected version $expectedVersion, but current version is $currentVersion"
-                )
+
+    private val mutex = Mutex()
+
+    override suspend fun commit(
+        aggregateId: String,
+        event: Event,
+        expectedVersion: Hash
+    ): Hash {
+        // Acquire the mutex lock to ensure thread safety
+        mutex.withLock {
+            // Check if this is a new aggregate or an update to an existing one
+            if (versionStore.containsKey(aggregateId)) {
+                // This is an update to an existing aggregate
+                val currentVersion = versionStore[aggregateId]
+
+                // Optimistic concurrency check - only proceed if the expected version matches the current version
+                if (currentVersion != expectedVersion) {
+                    throw ConcurrencyException(
+                        "Concurrency conflict: expected version $expectedVersion, but current version is $currentVersion"
+                    )
+                }
+            } else {
+                // For a new aggregate, make sure we're initializing with the zero hash
+                val zeroHash = Hash("0".repeat(64))
+                if (expectedVersion != zeroHash) {
+                    throw ConcurrencyException(
+                        "Concurrency conflict: expected initial version to be $zeroHash, but got $expectedVersion"
+                    )
+                }
             }
-        } else {
-            // For a new aggregate, make sure we're initializing with the zero hash
-            val zeroHash = Hash("0".repeat(64))
-            if (expectedVersion != zeroHash) {
-                throw ConcurrencyException(
-                    "Concurrency conflict: expected initial version to be $zeroHash, but got $expectedVersion"
-                )
-            }
-        }
-        
-        // Add events to the store
-        if (events.isNotEmpty()) {
+
+            // Add events to the store
             val eventList = eventStore.getOrPut(aggregateId) { mutableListOf() }
-            eventList.addAll(events)
-            
+            eventList.add(event)
+
             // Update the version to the hash of the last event
-            versionStore[aggregateId] = events.last().hash()
+            versionStore[aggregateId] = event.hash()
+
+            return versionStore[aggregateId] ?: Hash("0".repeat(64))
         }
     }
 

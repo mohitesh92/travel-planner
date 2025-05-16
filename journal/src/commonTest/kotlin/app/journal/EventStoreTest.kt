@@ -1,10 +1,13 @@
 package app.journal
 
 import app.journal.supporting.InMemoryEventStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class EventStoreTest {
     
@@ -30,8 +33,8 @@ class EventStoreTest {
         )
         
         // Act
-        store.commit(aggregateId, listOf(event1), zeroHash)
-        store.commit(aggregateId, listOf(event2), event1.hash())
+        val currentHash = store.commit(aggregateId, event1, zeroHash)
+        store.commit(aggregateId, (event2), currentHash)
         val retrievedEvents = store.getEventsForAggregate(aggregateId)
         
         // Assert
@@ -46,8 +49,7 @@ class EventStoreTest {
         val store = InMemoryEventStore()
         val aggregateId = "aggregate-1"
         val zeroHash = Hash("0".repeat(64))
-        val correctHash = Hash("1".repeat(64)) // This matches what our TestEvent.hash() returns
-        val wrongHash = Hash("2".repeat(64))   // This is different
+        val wrongHash = someHash()  // This is different
         val event = TestEvent(
             id = "event-1",
             aggregateId = aggregateId,
@@ -57,24 +59,27 @@ class EventStoreTest {
         )
         
         // First commit succeeds
-        store.commit(aggregateId, listOf(event), zeroHash)
+        val correctHash = store.commit(aggregateId, event, zeroHash)
         
         // Act & Assert - Second commit with wrong version fails
         assertFailsWith<ConcurrencyException> {
-            // After first commit, the version will be event.hash() (1111...)
-            // So we intentionally use wrongHash (2222...) to cause a concurrency exception
-            store.commit(aggregateId, listOf(
-                TestEvent(
-                    id = "event-2",
-                    aggregateId = aggregateId,
-                    timestamp = 2000L,
-                    currentVersion = correctHash, 
-                    data = "Second event"
-                )
-            ), wrongHash)
+            // Try to commit with a different hash
+            store.commit(
+                aggregateId = aggregateId,
+                event = (
+                    TestEvent(
+                        id = "event-2",
+                        aggregateId = aggregateId,
+                        timestamp = 2000L,
+                        currentVersion = correctHash,
+                        data = "Second event"
+                    )
+                ),
+                expectedVersion = wrongHash
+            )
         }
     }
-    
+
     @Test
     fun `should enforce new aggregates start with zero hash`() = runTest {
         // Arrange
@@ -92,7 +97,7 @@ class EventStoreTest {
         // Act & Assert
         assertFailsWith<ConcurrencyException> {
             // Try to commit with non-zero hash for new aggregate
-            store.commit(aggregateId, listOf(event), nonZeroHash)
+            store.commit(aggregateId, event, nonZeroHash)
         }
     }
     
@@ -131,9 +136,9 @@ class EventStoreTest {
         )
         
         // Act
-        store.commit(aggregate1, listOf(event1), zeroHash)
-        store.commit(aggregate2, listOf(event2), zeroHash)
-        store.commit(aggregate1, listOf(event3), event1.hash())
+        store.commit(aggregate1, event1, zeroHash)
+        store.commit(aggregate2, event2, zeroHash)
+        store.commit(aggregate1, event3, event1.hash())
         
         // Collect all events from the flow
         val allEvents = mutableListOf<Event>()
@@ -145,6 +150,89 @@ class EventStoreTest {
         assertEquals(event1.id, allEvents[0].id, "First event should be the earliest by timestamp")
         assertEquals(event2.id, allEvents[1].id, "Second event should be the middle by timestamp")
         assertEquals(event3.id, allEvents[2].id, "Third event should be the latest by timestamp")
+    }
+    
+    @Test
+    fun `should handle concurrent commits to the same aggregateId`() = runTest {
+        // Arrange
+        val store = InMemoryEventStore()
+        val aggregateId = "concurrent-aggregate"
+        val zeroHash = Hash("0".repeat(64))
+
+        // First event to establish the aggregate
+        val initialEvent = TestEvent(
+            id = "initial-event",
+            aggregateId = aggregateId,
+            timestamp = 1000L,
+            currentVersion = null,
+            data = "Initial event"
+        )
+        
+        // Commit the initial event
+        val eventHash = store.commit(aggregateId, (initialEvent), zeroHash)
+        
+        // Create two events that will be committed concurrently
+        val event1 = TestEvent(
+            id = "concurrent-event-1",
+            aggregateId = aggregateId,
+            timestamp = 2000L,
+            currentVersion = eventHash,
+            data = "Concurrent event 1"
+        )
+        
+        val event2 = TestEvent(
+            id = "concurrent-event-2",
+            aggregateId = aggregateId,
+            timestamp = 3000L,
+            currentVersion = eventHash,
+            data = "Concurrent event 2"
+        )
+        
+        // Track success/failure results
+        var firstResult = false
+        var secondResult = false
+        
+        // Act - Launch two coroutines to commit events concurrently
+        listOf(
+            async {
+                try {
+                    store.commit(aggregateId, event1, eventHash)
+                    firstResult = true // Success
+                } catch (e: ConcurrencyException) {
+                    firstResult = false // Failure
+                }
+            },
+            async {
+                try {
+                    // Add a small delay to increase the likelihood of a race condition
+                    store.commit(aggregateId, event2, eventHash)
+                    secondResult = true // Success
+                } catch (e: ConcurrencyException) {
+                    secondResult = false // Failure
+                }
+            }
+        ).awaitAll()
+
+        println("First commit result: $firstResult")
+        println("Second commit result: $secondResult")
+        
+        // Assert - One operation should succeed and one should fail
+        assertTrue(
+            (firstResult && !secondResult) || (!firstResult && secondResult),
+            "One commit should succeed and one should fail"
+        )
+        
+        // Verify the event store state
+        val events = store.getEventsForAggregate(aggregateId)
+        assertEquals(2, events.size, "Should have two events (initial + one of the concurrent ones)")
+        assertEquals(initialEvent.id, events[0].id, "First event should be the initial event")
+        
+        // The second event should be either event1 or event2, depending on which commit succeeded
+        val committedEventId = events[1].id
+        assertTrue(
+            committedEventId == event1.id || committedEventId == event2.id,
+            "Second event should be one of the concurrent events"
+        )
     }
 }
 
@@ -160,7 +248,18 @@ data class TestEvent(
 ) : Event {
     override fun hash(): Hash {
         // Simple implementation for testing
-        val hashString = "1".repeat(64)
-        return Hash(hashString)
+        return toString().hash
     }
+}
+
+fun someHash(): Hash {
+    // Generate a random hash for testing
+    return getRandomString(10).hash
+}
+
+fun getRandomString(length: Int) : String {
+    val allowedChars = ('A'..'Z') + ('a'..'z') + ('0'..'9')
+    return (1..length)
+        .map { allowedChars.random() }
+        .joinToString("")
 }

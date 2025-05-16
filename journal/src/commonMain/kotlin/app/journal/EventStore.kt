@@ -12,13 +12,14 @@ interface EventStore {
      * Saves a sequence of events for a specific aggregate.
      * 
      * @param aggregateId The ID of the aggregate these events belong to
-     * @param events The list of events to save
+     * @param event The event to save
      * @param expectedVersion The expected current version of the aggregate (for optimistic concurrency)
      * @throws ConcurrencyException If the expected version doesn't match the actual version
+     * @return The new version (hash) of the aggregate after the commit
      */
     @Throws(ConcurrencyException::class, CancellationException::class)
-    suspend fun commit(aggregateId: String, events: List<Event>, expectedVersion: Hash)
-    
+    suspend fun commit(aggregateId: String, event: Event, expectedVersion: Hash) : Hash
+
     /**
      * Retrieves all events for a specific aggregate.
      * 
